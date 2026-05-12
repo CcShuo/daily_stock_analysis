@@ -1177,7 +1177,7 @@ class SystemConfigServiceTestCase(unittest.TestCase):
 
         self.assertTrue(payload["success"])
         self.assertEqual(payload["resolved_model"], "openai/kimi-k2.6")
-        self.assertEqual(mock_completion.call_args.kwargs["temperature"], 1.0)
+        self.assertNotIn("temperature", mock_completion.call_args.kwargs)
 
     def test_update_switching_to_kimi_does_not_rewrite_saved_llm_temperature(self) -> None:
         self._rewrite_env(
@@ -1197,7 +1197,7 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         self.assertEqual(current_map["LLM_TEMPERATURE"], "0.42")
 
     @patch("litellm.completion")
-    def test_test_llm_channel_does_not_persist_normalized_kimi_temperature(self, mock_completion) -> None:
+    def test_test_llm_channel_omits_temperature_without_persisting_config(self, mock_completion) -> None:
         self._rewrite_env("LLM_TEMPERATURE=0.42")
         mock_completion.return_value = type(
             "MockResponse",
@@ -1216,17 +1216,14 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         )
 
         self.assertTrue(payload["success"])
-        self.assertEqual(mock_completion.call_args.kwargs["temperature"], 1.0)
+        self.assertNotIn("temperature", mock_completion.call_args.kwargs)
         self.assertEqual(self.manager.read_config_map()["LLM_TEMPERATURE"], "0.42")
 
     @patch("litellm.completion")
-    @patch("src.services.system_config_service.Config._load_from_env")
-    def test_test_llm_channel_uses_runtime_temperature_for_non_kimi_models(
+    def test_test_llm_channel_omits_temperature_for_non_kimi_models(
         self,
-        mock_load_config,
         mock_completion,
     ) -> None:
-        mock_load_config.return_value = SimpleNamespace(llm_temperature=0.42)
         mock_completion.return_value = type(
             "MockResponse",
             (),
@@ -1245,7 +1242,7 @@ class SystemConfigServiceTestCase(unittest.TestCase):
 
         self.assertTrue(payload["success"])
         self.assertEqual(payload["resolved_model"], "openai/gpt-4o-mini")
-        self.assertEqual(mock_completion.call_args.kwargs["temperature"], 0.42)
+        self.assertNotIn("temperature", mock_completion.call_args.kwargs)
 
     @patch("litellm.completion")
     def test_test_llm_channel_classifies_common_failure_scenarios(self, mock_completion) -> None:

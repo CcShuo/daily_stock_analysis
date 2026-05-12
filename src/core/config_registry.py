@@ -211,7 +211,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     "LLM_TEMPERATURE": {
         "title": "Temperature",
-        "description": "Unified sampling temperature for all LLM calls. Range [0.0, 2.0], default 0.7.",
+        "description": "Legacy sampling temperature setting kept for compatibility. Runtime LiteLLM calls omit temperature by default for relay compatibility.",
         "category": "ai_model",
         "data_type": "number",
         "ui_control": "number",

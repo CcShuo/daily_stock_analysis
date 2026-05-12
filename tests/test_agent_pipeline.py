@@ -1549,8 +1549,8 @@ class TestAgentConstructionChain(unittest.TestCase):
         self.assertEqual(result.content, "ok")
 
     @patch("src.agent.llm_adapter.Router")
-    def test_llm_adapter_normalizes_kimi_k26_temperature(self, _mock_router):
-        """Agent direct LiteLLM calls should not send unsupported temperatures to Kimi K2.6."""
+    def test_llm_adapter_omits_temperature(self, _mock_router):
+        """Agent direct LiteLLM calls should avoid provider-specific temperature failures."""
         mock_cfg = SimpleNamespace(
             agent_litellm_model="",
             litellm_model="openai/kimi-k2.6",
@@ -1588,11 +1588,11 @@ class TestAgentConstructionChain(unittest.TestCase):
             )
 
         self.assertEqual(result.content, "agent ok")
-        self.assertEqual(mock_completion.call_args.kwargs["temperature"], 1.0)
+        self.assertNotIn("temperature", mock_completion.call_args.kwargs)
 
     @patch("src.agent.llm_adapter.Router")
-    def test_llm_adapter_normalizes_kimi_k26_temperature_for_yaml_alias(self, _mock_router):
-        """Agent direct LiteLLM calls should normalize through routed YAML aliases."""
+    def test_llm_adapter_omits_temperature_for_yaml_alias(self, _mock_router):
+        """Agent direct LiteLLM calls should omit temperature through routed YAML aliases."""
         mock_cfg = SimpleNamespace(
             agent_litellm_model="",
             litellm_model="kimi_router",
@@ -1635,11 +1635,11 @@ class TestAgentConstructionChain(unittest.TestCase):
             )
 
         self.assertEqual(result.content, "agent ok")
-        self.assertEqual(mock_completion.call_args.kwargs["temperature"], 1.0)
+        self.assertNotIn("temperature", mock_completion.call_args.kwargs)
 
     @patch("src.agent.llm_adapter.Router")
-    def test_llm_adapter_normalizes_kimi_k26_temperature_for_non_thinking_yaml_alias(self, _mock_router):
-        """Agent direct LiteLLM calls should honor non-thinking Kimi YAML overrides."""
+    def test_llm_adapter_omits_temperature_for_non_thinking_yaml_alias(self, _mock_router):
+        """Agent direct LiteLLM calls should omit temperature for non-thinking YAML aliases."""
         mock_cfg = SimpleNamespace(
             agent_litellm_model="",
             litellm_model="kimi_router",
@@ -1685,11 +1685,11 @@ class TestAgentConstructionChain(unittest.TestCase):
             )
 
         self.assertEqual(result.content, "agent ok")
-        self.assertEqual(mock_completion.call_args.kwargs["temperature"], 0.6)
+        self.assertNotIn("temperature", mock_completion.call_args.kwargs)
 
     @patch("src.agent.llm_adapter.Router")
-    def test_llm_adapter_fallback_does_not_leak_kimi_fixed_temperature(self, _mock_router):
-        """Non-Kimi fallbacks should keep the requested temperature after a Kimi failure."""
+    def test_llm_adapter_fallbacks_omit_temperature(self, _mock_router):
+        """Fallback attempts should not send provider-specific temperature values."""
         mock_cfg = SimpleNamespace(
             agent_litellm_model="",
             litellm_model="openai/kimi-k2.6",
@@ -1716,10 +1716,10 @@ class TestAgentConstructionChain(unittest.TestCase):
             ],
             usage=SimpleNamespace(prompt_tokens=1, completion_tokens=2, total_tokens=3),
         )
-        temperatures = []
+        calls = []
 
         def fake_completion(**kwargs):
-            temperatures.append((kwargs["model"], kwargs["temperature"]))
+            calls.append((kwargs["model"], "temperature" in kwargs))
             if kwargs["model"] == "openai/kimi-k2.6":
                 raise RuntimeError("primary failed")
             return response
@@ -1733,8 +1733,8 @@ class TestAgentConstructionChain(unittest.TestCase):
 
         self.assertEqual(result.content, "fallback ok")
         self.assertEqual(
-            temperatures,
-            [("openai/kimi-k2.6", 1.0), ("openai/gpt-4o-mini", 0.2)],
+            calls,
+            [("openai/kimi-k2.6", False), ("openai/gpt-4o-mini", False)],
         )
 
     @patch("src.agent.llm_adapter.Router")

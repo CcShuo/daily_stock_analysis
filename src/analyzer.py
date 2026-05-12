@@ -30,7 +30,6 @@ from src.config import (
     get_api_keys_for_model,
     get_config,
     get_configured_llm_models,
-    normalize_litellm_temperature,
     resolve_news_window_days,
 )
 from src.storage import persist_llm_usage
@@ -2032,8 +2031,6 @@ class GeminiAnalyzer:
             or generation_config.get('max_tokens')
             or 8192
         )
-        requested_temperature = generation_config.get('temperature', 0.7)
-
         models_to_try = [config.litellm_model] + (config.litellm_fallback_models or [])
         models_to_try = [m for m in models_to_try if m]
 
@@ -2055,12 +2052,6 @@ class GeminiAnalyzer:
                         {"role": "system", "content": effective_system_prompt},
                         {"role": "user", "content": prompt},
                     ],
-                    "temperature": normalize_litellm_temperature(
-                        model,
-                        requested_temperature,
-                        model_list=config.llm_model_list,
-                        request_overrides={"extra_body": extra} if extra else None,
-                    ),
                     "max_tokens": max_tokens,
                 }
                 if extra:
@@ -2158,7 +2149,7 @@ class GeminiAnalyzer:
         Args:
             prompt:      Text prompt to send to the LLM.
             max_tokens:  Maximum tokens in the response (default 2048).
-            temperature: Sampling temperature (default 0.7).
+            temperature: Legacy argument retained for call compatibility; currently not sent to LiteLLM.
 
         Returns:
             Response text, or None if the LLM call fails (error is logged).
@@ -2166,7 +2157,7 @@ class GeminiAnalyzer:
         try:
             result = self._call_litellm(
                 prompt,
-                generation_config={"max_tokens": max_tokens, "temperature": temperature},
+                generation_config={"max_tokens": max_tokens},
             )
             if isinstance(result, tuple):
                 text, model_used, usage = result
@@ -2265,7 +2256,6 @@ class GeminiAnalyzer:
 
             # 设置生成配置
             generation_config = {
-                "temperature": config.llm_temperature,
                 "max_output_tokens": 8192,
             }
 

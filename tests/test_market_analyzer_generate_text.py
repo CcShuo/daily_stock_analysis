@@ -51,7 +51,7 @@ class TestAnalyzerGenerateText:
             assert result == "市场分析报告"
             mock_call.assert_called_once_with(
                 "写一份复盘",
-                generation_config={"max_tokens": 1024, "temperature": 0.5},
+                generation_config={"max_tokens": 1024},
             )
 
     def test_generate_text_returns_none_on_failure(self):
@@ -67,7 +67,7 @@ class TestAnalyzerGenerateText:
             _, kwargs = mock_call.call_args
             gen_cfg = kwargs["generation_config"]
             assert gen_cfg["max_tokens"] == 2048
-            assert gen_cfg["temperature"] == 0.7
+            assert "temperature" not in gen_cfg
 
     def test_call_litellm_stream_aggregates_chunks_and_reports_progress(self):
         analyzer = self._make_analyzer()
@@ -141,7 +141,7 @@ class TestAnalyzerGenerateText:
         assert dispatch_calls[0]["stream"] is True
         assert "stream" not in dispatch_calls[1]
 
-    def test_call_litellm_normalizes_kimi_k26_temperature(self):
+    def test_call_litellm_omits_temperature(self):
         analyzer = self._make_analyzer()
         analyzer._config_override = SimpleNamespace(
             litellm_model="openai/kimi-k2.6",
@@ -163,9 +163,9 @@ class TestAnalyzerGenerateText:
         assert model_used == "openai/kimi-k2.6"
         assert usage == {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
         call_kwargs = mock_dispatch.call_args.args[1]
-        assert call_kwargs["temperature"] == 1.0
+        assert "temperature" not in call_kwargs
 
-    def test_call_litellm_normalizes_kimi_k26_temperature_for_yaml_alias(self):
+    def test_call_litellm_omits_temperature_for_yaml_alias(self):
         analyzer = self._make_analyzer()
         analyzer._config_override = SimpleNamespace(
             litellm_model="kimi_router",
@@ -192,9 +192,9 @@ class TestAnalyzerGenerateText:
         assert model_used == "kimi_router"
         assert usage == {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
         call_kwargs = mock_dispatch.call_args.args[1]
-        assert call_kwargs["temperature"] == 1.0
+        assert "temperature" not in call_kwargs
 
-    def test_call_litellm_normalizes_kimi_k26_temperature_for_non_thinking_yaml_alias(self):
+    def test_call_litellm_omits_temperature_for_non_thinking_yaml_alias(self):
         analyzer = self._make_analyzer()
         analyzer._config_override = SimpleNamespace(
             litellm_model="kimi_router",
@@ -224,9 +224,9 @@ class TestAnalyzerGenerateText:
         assert model_used == "kimi_router"
         assert usage == {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
         call_kwargs = mock_dispatch.call_args.args[1]
-        assert call_kwargs["temperature"] == 0.6
+        assert "temperature" not in call_kwargs
 
-    def test_call_litellm_keeps_user_temperature_for_non_kimi_fallback(self):
+    def test_call_litellm_omits_temperature_for_fallbacks(self):
         analyzer = self._make_analyzer()
         analyzer._config_override = SimpleNamespace(
             litellm_model="openai/kimi-k2.6",
@@ -237,10 +237,10 @@ class TestAnalyzerGenerateText:
             choices=[SimpleNamespace(message=SimpleNamespace(content="fallback ok"))],
             usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
         )
-        temperatures = []
+        calls = []
 
         def fake_dispatch(model, call_kwargs, **kwargs):
-            temperatures.append((model, call_kwargs["temperature"]))
+            calls.append((model, "temperature" in call_kwargs))
             if model == "openai/kimi-k2.6":
                 raise RuntimeError("primary failed")
             return response
@@ -254,9 +254,9 @@ class TestAnalyzerGenerateText:
         assert text == "fallback ok"
         assert model_used == "openai/gpt-4o-mini"
         assert usage == {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
-        assert temperatures == [
-            ("openai/kimi-k2.6", 1.0),
-            ("openai/gpt-4o-mini", 0.2),
+        assert calls == [
+            ("openai/kimi-k2.6", False),
+            ("openai/gpt-4o-mini", False),
         ]
 
     def test_call_litellm_stream_falls_back_to_non_stream_after_partial_and_falls_back_model(self):
@@ -665,7 +665,7 @@ class TestMarketAnalyzerBypassFix:
         ma.analyzer.generate_text.assert_called_once()
         _, kwargs = ma.analyzer.generate_text.call_args
         assert kwargs["max_tokens"] == 8192
-        assert kwargs["temperature"] == 0.7
+        assert "temperature" not in kwargs
 
     def test_generate_template_review_uses_english_shell_for_cn_when_report_language_is_en(self):
         from src.market_analyzer import MarketOverview, MarketIndex
