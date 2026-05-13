@@ -341,6 +341,8 @@ daily_stock_analysis/
 > - ETF：返回可得项，缺失能力标记为 `not_supported`，整体不影响原流程；
 > - 美股/港股：返回 `not_supported` 兜底块；
 > - 任何异常走 fail-open，仅记录错误，不影响技术面/新闻/筹码主链路。
+> - 配置 `TUSHARE_TOKEN` 后，结构化财报字段会优先尝试 Tushare `income`、`cashflow`、`fina_indicator` 与 `dividend`，失败或缺字段时再回落 AkShare。
+> - GitHub Actions 默认将基本面阶段预算放宽到 `FUNDAMENTAL_STAGE_TIMEOUT_SECONDS=8`、`FUNDAMENTAL_FETCH_TIMEOUT_SECONDS=6`，以便 Tushare 财报接口有足够时间返回；可用 Repository Variables 覆盖。
 > - 配置 `TICKFLOW_API_KEY` 后，仅 A 股大盘复盘会额外优先尝试 TickFlow 的主要指数行情；若当前套餐支持标的池查询，市场涨跌统计也会优先尝试 TickFlow。个股链路和实时行情优先级不变。
 > - TickFlow 能力按套餐权限分层：有限权限套餐仍可使用主指数查询；支持 `CN_Equity_A` 标的池查询的套餐才会启用 TickFlow 市场统计。
 > - 官方 quickstart 已文档化 `quotes.get(universes=["CN_Equity_A"])`，但线上 smoke test 进一步确认：`TICKFLOW_API_KEY` 不等于一定具备该权限，且 `quotes.get(symbols=[...])` 单次存在标的数量限制。

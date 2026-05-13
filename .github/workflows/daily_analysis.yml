@@ -361,6 +361,10 @@ jobs:
           # 可选值: tencent, akshare_sina, efinance, akshare_em, tushare
           # 如果有 Tushare Pro 高积分账号，可将 tushare 放在首位
           REALTIME_SOURCE_PRIORITY: ${{ vars.REALTIME_SOURCE_PRIORITY || 'tencent,akshare_sina,efinance,akshare_em' }}
+          # Tushare 财报接口需要连续请求 income/cashflow/fina_indicator/dividend，GitHub Actions 默认放宽基本面预算
+          FUNDAMENTAL_STAGE_TIMEOUT_SECONDS: ${{ vars.FUNDAMENTAL_STAGE_TIMEOUT_SECONDS || secrets.FUNDAMENTAL_STAGE_TIMEOUT_SECONDS || '8' }}
+          FUNDAMENTAL_FETCH_TIMEOUT_SECONDS: ${{ vars.FUNDAMENTAL_FETCH_TIMEOUT_SECONDS || secrets.FUNDAMENTAL_FETCH_TIMEOUT_SECONDS || '6' }}
+          FUNDAMENTAL_RETRY_MAX: ${{ vars.FUNDAMENTAL_RETRY_MAX || secrets.FUNDAMENTAL_RETRY_MAX || '1' }}
           
         run: |
           # 处理 LITELLM YAML 配置文件

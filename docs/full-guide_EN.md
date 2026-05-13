@@ -306,6 +306,8 @@ For the P0 notification baseline and diagnostics, see [Notification Baseline](no
 > - **ETFs**: Returns available items, marks missing capabilities as `not_supported`, and does not affect the original flow overall.
 > - **US/HK stocks**: Returns `not_supported` fallback block.
 > - Any exception uses fail-open logic, only logs errors without affecting the main technical/news/chip pipeline.
+> - When `TUSHARE_TOKEN` is configured, structured financial fields prefer Tushare `income`, `cashflow`, `fina_indicator`, and `dividend`, then fall back to AkShare for failures or missing fields.
+> - GitHub Actions widens the fundamental budget to `FUNDAMENTAL_STAGE_TIMEOUT_SECONDS=8` and `FUNDAMENTAL_FETCH_TIMEOUT_SECONDS=6` by default so Tushare financial endpoints have enough time to return; override them with Repository Variables when needed.
 > - **Field contracts**:
 >   - `fundamental_context.belong_boards` = related board list for the stock (currently populated for A-shares only; `[]` when unavailable);
 >   - `fundamental_context.boards.data` = `sector_rankings` (sector rise/fall leaderboard, structure `{top, bottom}`);

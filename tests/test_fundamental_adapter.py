@@ -7,7 +7,8 @@ import os
 import sys
 import unittest
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
@@ -15,8 +16,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from data_provider.fundamental_adapter import (
     AkshareFundamentalAdapter,
+    _TushareFundamentalClient,
     _build_dividend_payload,
     _extract_latest_row,
+    _has_meaningful_payload,
     _parse_dividend_plan_to_per_share,
 )
 
@@ -169,6 +172,91 @@ class TestFundamentalAdapter(unittest.TestCase):
         payload = _build_dividend_payload(df, stock_code="600519")
         self.assertEqual(payload.get("ttm_event_count"), 1)
         self.assertAlmostEqual(payload.get("ttm_cash_dividend_per_share"), 0.3, places=6)
+
+    def test_has_meaningful_payload_ignores_all_none_values(self) -> None:
+        self.assertFalse(_has_meaningful_payload({"a": None, "b": {"c": None}}))
+        self.assertTrue(_has_meaningful_payload({"a": None, "b": {"c": 1}}))
+
+    def test_tushare_fundamental_bundle_prefers_structured_financials(self) -> None:
+        adapter = AkshareFundamentalAdapter()
+        response_payloads = [
+            {
+                "code": 0,
+                "data": {
+                    "fields": [
+                        "ts_code",
+                        "ann_date",
+                        "end_date",
+                        "roe",
+                        "grossprofit_margin",
+                        "tr_yoy",
+                        "netprofit_yoy",
+                    ],
+                    "items": [["600519.SH", "20260420", "20260331", 18.2, 91.5, 12.0, 9.5]],
+                },
+            },
+            {
+                "code": 0,
+                "data": {
+                    "fields": ["ts_code", "ann_date", "end_date", "total_revenue", "revenue", "n_income_attr_p"],
+                    "items": [["600519.SH", "20260420", "20260331", 1000.0, 990.0, 300.0]],
+                },
+            },
+            {
+                "code": 0,
+                "data": {
+                    "fields": ["ts_code", "ann_date", "end_date", "n_cashflow_act"],
+                    "items": [["600519.SH", "20260420", "20260331", 500.0]],
+                },
+            },
+            {
+                "code": 0,
+                "data": {
+                    "fields": ["ts_code", "ann_date", "end_date", "cash_div_tax", "record_date", "ex_date"],
+                    "items": [["600519.SH", "20260420", "20251231", 3.0, "20260520", "20260521"]],
+                },
+            },
+        ]
+        responses = [
+            MagicMock(status_code=200, text=__import__("json").dumps(payload))
+            for payload in response_payloads
+        ]
+        config = SimpleNamespace(tushare_token="demo-token", tushare_api_url="http://relay.example.com/")
+
+        with patch("src.config.get_config", return_value=config), \
+                patch("data_provider.fundamental_adapter.requests.post", side_effect=responses) as post_mock, \
+                patch.object(
+                    adapter,
+                    "_call_df_candidates",
+                    return_value=(None, None, []),
+                ):
+            result = adapter.get_fundamental_bundle("600519")
+
+        financial_report = result["earnings"].get("financial_report", {})
+        self.assertEqual(financial_report.get("report_date"), "2026-03-31")
+        self.assertEqual(financial_report.get("revenue"), 1000.0)
+        self.assertEqual(financial_report.get("net_profit_parent"), 300.0)
+        self.assertEqual(financial_report.get("operating_cash_flow"), 500.0)
+        self.assertEqual(financial_report.get("roe"), 18.2)
+        self.assertEqual(result["growth"].get("revenue_yoy"), 12.0)
+        self.assertEqual(result["growth"].get("net_profit_yoy"), 9.5)
+        self.assertIn("financial_report:tushare_income_cashflow_fina_indicator", result["source_chain"])
+        self.assertTrue(any(call.kwargs["json"]["api_name"] == "income" for call in post_mock.call_args_list))
+
+    def test_tushare_client_posts_to_configured_endpoint(self) -> None:
+        client = _TushareFundamentalClient("demo-token", "http://relay.example.com/", timeout=12)
+        response = MagicMock(
+            status_code=200,
+            text='{"code":0,"data":{"fields":["ts_code"],"items":[["600519.SH"]]}}',
+        )
+        with patch("data_provider.fundamental_adapter.requests.post", return_value=response) as post_mock:
+            df = client.query("income", params={"ts_code": "600519.SH"}, fields="ts_code")
+        self.assertEqual(df.iloc[0]["ts_code"], "600519.SH")
+        post_mock.assert_called_once_with(
+            "http://relay.example.com/",
+            json={"api_name": "income", "token": "demo-token", "params": {"ts_code": "600519.SH"}, "fields": "ts_code"},
+            timeout=12,
+        )
 
 
 if __name__ == "__main__":

@@ -8,12 +8,14 @@ endpoint candidates. It should never raise to caller; partial data is allowed.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -261,8 +263,291 @@ def _extract_latest_row(df: pd.DataFrame, stock_code: str) -> Optional[pd.Series
     return df.iloc[0]
 
 
+def _merge_missing(target: Dict[str, Any], source: Dict[str, Any]) -> bool:
+    """Fill missing/None keys in target from source, recursively."""
+    changed = False
+    for key, value in source.items():
+        if isinstance(value, dict):
+            target_child = target.get(key)
+            if not isinstance(target_child, dict):
+                if value:
+                    target[key] = dict(value)
+                    changed = True
+                continue
+            if _merge_missing(target_child, value):
+                changed = True
+            continue
+        if key not in target or target.get(key) is None:
+            target[key] = value
+            changed = True
+    return changed
+
+
+def _has_meaningful_payload(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    for value in payload.values():
+        if isinstance(value, dict):
+            if _has_meaningful_payload(value):
+                return True
+        elif isinstance(value, list):
+            if value:
+                return True
+        elif value is not None and value != "":
+            return True
+    return False
+
+
+def _to_tushare_ts_code(stock_code: str) -> Optional[str]:
+    raw = _safe_str(stock_code).upper()
+    if raw.endswith((".SH", ".SZ", ".BJ")):
+        return raw
+    code = _normalize_code(raw)
+    if not re.fullmatch(r"\d{6}", code):
+        return None
+    if code.startswith(("600", "601", "603", "605", "688", "689", "900")):
+        return f"{code}.SH"
+    if code.startswith(("000", "001", "002", "003", "300", "301", "200")):
+        return f"{code}.SZ"
+    if code.startswith(("430", "4", "8", "920")):
+        return f"{code}.BJ"
+    return f"{code}.SZ"
+
+
+def _latest_tushare_row(df: Optional[pd.DataFrame]) -> Optional[pd.Series]:
+    if df is None or df.empty:
+        return None
+    work_df = df.copy()
+    for col in ("end_date", "ann_date", "f_ann_date"):
+        if col in work_df.columns:
+            work_df[col] = work_df[col].astype(str)
+    sort_cols = [col for col in ("end_date", "ann_date", "f_ann_date") if col in work_df.columns]
+    if sort_cols:
+        work_df = work_df.sort_values(sort_cols, ascending=False)
+    return work_df.iloc[0]
+
+
+def _normalize_tushare_report_date(value: Any) -> Optional[str]:
+    text = _safe_str(value)
+    if re.fullmatch(r"\d{8}", text):
+        return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+    return _normalize_report_date(value)
+
+
+def _build_tushare_dividend_payload(dividend_df: pd.DataFrame, stock_code: str) -> Dict[str, Any]:
+    if dividend_df is None or dividend_df.empty:
+        return {}
+    work_df = dividend_df.copy()
+    rename_map = {
+        "ts_code": "ts_code",
+        "ex_date": "除息日",
+        "record_date": "股权登记日",
+        "ann_date": "公告日期",
+        "cash_div_tax": "税前派息(元/股)",
+        "cash_div": "派息(元/股)",
+    }
+    normalized = pd.DataFrame()
+    for source_col, target_col in rename_map.items():
+        if source_col in work_df.columns:
+            normalized[target_col] = work_df[source_col]
+    if normalized.empty:
+        return {}
+    return _build_dividend_payload(normalized, stock_code, max_events=5)
+
+
+class _TushareFundamentalClient:
+    """Minimal Tushare Pro HTTP client for structured financial statements."""
+
+    def __init__(self, token: str, api_url: str, timeout: int = 15) -> None:
+        self._token = token
+        self._api_url = api_url
+        self._timeout = timeout
+
+    def query(
+        self,
+        api_name: str,
+        params: Optional[Dict[str, Any]] = None,
+        fields: str = "",
+    ) -> pd.DataFrame:
+        response = requests.post(
+            self._api_url,
+            json={
+                "api_name": api_name,
+                "token": self._token,
+                "params": params or {},
+                "fields": fields,
+            },
+            timeout=self._timeout,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"Tushare API HTTP {response.status_code}")
+        payload = json.loads(response.text)
+        if payload.get("code") != 0:
+            raise RuntimeError(payload.get("msg") or f"Tushare API error code {payload.get('code')}")
+        data = payload.get("data") or {}
+        return pd.DataFrame(data.get("items") or [], columns=data.get("fields") or [])
+
+
 class AkshareFundamentalAdapter:
     """AkShare adapter for fundamentals, capital flow and dragon-tiger signals."""
+
+    def _get_tushare_client(self) -> Tuple[Optional[_TushareFundamentalClient], List[str]]:
+        try:
+            from src.config import get_config
+
+            config = get_config()
+        except Exception as exc:
+            return None, [f"tushare_config:{type(exc).__name__}"]
+
+        token = (_safe_str(getattr(config, "tushare_token", "")) or "").strip()
+        if not token:
+            return None, []
+        api_url = (
+            _safe_str(getattr(config, "tushare_api_url", ""))
+            or "http://api.tushare.pro"
+        ).strip() or "http://api.tushare.pro"
+        return _TushareFundamentalClient(token=token, api_url=api_url), []
+
+    def _query_tushare(
+        self,
+        client: _TushareFundamentalClient,
+        api_name: str,
+        params: Dict[str, Any],
+        fields: str,
+        errors: List[str],
+    ) -> Optional[pd.DataFrame]:
+        try:
+            df = client.query(api_name, params=params, fields=fields)
+        except Exception as exc:
+            errors.append(f"tushare_{api_name}:{type(exc).__name__}")
+            return None
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            return df
+        errors.append(f"tushare_{api_name}:empty")
+        return None
+
+    def _get_tushare_fundamental_bundle(self, stock_code: str) -> Dict[str, Any]:
+        result: Dict[str, Any] = {
+            "status": "not_supported",
+            "growth": {},
+            "earnings": {},
+            "institution": {},
+            "source_chain": [],
+            "errors": [],
+        }
+        client, client_errors = self._get_tushare_client()
+        result["errors"].extend(client_errors)
+        if client is None:
+            return result
+
+        ts_code = _to_tushare_ts_code(stock_code)
+        if not ts_code:
+            result["errors"].append("tushare_unsupported_code")
+            return result
+
+        errors: List[str] = []
+        indicator_df = self._query_tushare(
+            client,
+            "fina_indicator",
+            {"ts_code": ts_code},
+            "ts_code,ann_date,end_date,roe,roe_dt,grossprofit_margin,netprofit_margin,tr_yoy,or_yoy,netprofit_yoy,dt_netprofit_yoy",
+            errors,
+        )
+        income_df = self._query_tushare(
+            client,
+            "income",
+            {"ts_code": ts_code},
+            "ts_code,ann_date,end_date,total_revenue,revenue,n_income_attr_p",
+            errors,
+        )
+        cashflow_df = self._query_tushare(
+            client,
+            "cashflow",
+            {"ts_code": ts_code},
+            "ts_code,ann_date,end_date,n_cashflow_act",
+            errors,
+        )
+        dividend_df = self._query_tushare(
+            client,
+            "dividend",
+            {"ts_code": ts_code},
+            "ts_code,ann_date,end_date,cash_div,cash_div_tax,record_date,ex_date,pay_date",
+            errors,
+        )
+
+        indicator_row = _latest_tushare_row(indicator_df)
+        income_row = _latest_tushare_row(income_df)
+        cashflow_row = _latest_tushare_row(cashflow_df)
+
+        report_date = None
+        for row in (indicator_row, income_row, cashflow_row):
+            if row is not None:
+                report_date = _normalize_tushare_report_date(row.get("end_date"))
+                if report_date:
+                    break
+
+        roe = _safe_float(indicator_row.get("roe")) if indicator_row is not None else None
+        gross_margin = (
+            _safe_float(indicator_row.get("grossprofit_margin")) if indicator_row is not None else None
+        )
+        revenue_yoy = None
+        profit_yoy = None
+        if indicator_row is not None:
+            revenue_yoy = _safe_float(indicator_row.get("tr_yoy"))
+            if revenue_yoy is None:
+                revenue_yoy = _safe_float(indicator_row.get("or_yoy"))
+            profit_yoy = _safe_float(indicator_row.get("netprofit_yoy"))
+            if profit_yoy is None:
+                profit_yoy = _safe_float(indicator_row.get("dt_netprofit_yoy"))
+
+        revenue = None
+        net_profit_parent = None
+        if income_row is not None:
+            revenue = _safe_float(income_row.get("total_revenue"))
+            if revenue is None:
+                revenue = _safe_float(income_row.get("revenue"))
+            net_profit_parent = _safe_float(income_row.get("n_income_attr_p"))
+
+        operating_cash_flow = (
+            _safe_float(cashflow_row.get("n_cashflow_act")) if cashflow_row is not None else None
+        )
+
+        growth_payload = {
+            "revenue_yoy": revenue_yoy,
+            "net_profit_yoy": profit_yoy,
+            "roe": roe,
+            "gross_margin": gross_margin,
+        }
+        financial_report_payload = {
+            "report_date": report_date,
+            "revenue": revenue,
+            "net_profit_parent": net_profit_parent,
+            "operating_cash_flow": operating_cash_flow,
+            "roe": roe,
+        }
+
+        if any(v is not None for v in growth_payload.values()):
+            result["growth"] = growth_payload
+            result["source_chain"].append("growth:tushare_fina_indicator")
+        if any(v is not None for v in financial_report_payload.values()):
+            result["earnings"]["financial_report"] = financial_report_payload
+            result["source_chain"].append("financial_report:tushare_income_cashflow_fina_indicator")
+
+        dividend_payload = _build_tushare_dividend_payload(dividend_df, stock_code) if dividend_df is not None else {}
+        if dividend_payload:
+            result["earnings"]["dividend"] = dividend_payload
+            result["source_chain"].append("dividend:tushare_dividend")
+
+        result["errors"].extend(errors)
+        has_content = bool(result["growth"] or result["earnings"] or result["institution"])
+        if has_content:
+            logger.info(
+                "[TushareFundamental] %s 结构化财报获取成功: sources=%s",
+                stock_code,
+                result["source_chain"],
+            )
+        result["status"] = "partial" if has_content else "not_supported"
+        return result
 
     def _call_df_candidates(
         self,
@@ -291,16 +576,17 @@ class AkshareFundamentalAdapter:
 
     def get_fundamental_bundle(self, stock_code: str) -> Dict[str, Any]:
         """
-        Return normalized fundamental blocks from AkShare with partial tolerance.
+        Return normalized fundamental blocks with Tushare preferred over AkShare.
         """
-        result: Dict[str, Any] = {
-            "status": "not_supported",
-            "growth": {},
-            "earnings": {},
-            "institution": {},
-            "source_chain": [],
-            "errors": [],
-        }
+        result: Dict[str, Any] = self._get_tushare_fundamental_bundle(stock_code)
+        if not isinstance(result, dict):
+            result = {}
+        result.setdefault("status", "not_supported")
+        result.setdefault("growth", {})
+        result.setdefault("earnings", {})
+        result.setdefault("institution", {})
+        result.setdefault("source_chain", [])
+        result.setdefault("errors", [])
 
         # Financial indicators
         fin_df, fin_source, fin_errors = self._call_df_candidates([
@@ -322,22 +608,28 @@ class AkshareFundamentalAdapter:
                 operating_cash_flow = _safe_float(
                     _pick_by_keywords(row, ["经营活动产生的现金流量净额", "经营现金流", "经营活动现金流"])
                 )
-                result["growth"] = {
+                akshare_growth = {
                     "revenue_yoy": revenue_yoy,
                     "net_profit_yoy": profit_yoy,
                     "roe": roe,
                     "gross_margin": gross_margin,
                 }
-                financial_report_payload = {
+                akshare_financial_report = {
                     "report_date": report_date,
                     "revenue": revenue,
                     "net_profit_parent": net_profit_parent,
                     "operating_cash_flow": operating_cash_flow,
                     "roe": roe,
                 }
-                if any(v is not None for v in financial_report_payload.values()):
-                    result["earnings"]["financial_report"] = financial_report_payload
-                result["source_chain"].append(f"growth:{fin_source}")
+                changed = _merge_missing(result["growth"], akshare_growth)
+                if any(v is not None for v in akshare_financial_report.values()):
+                    earnings_payload = result.setdefault("earnings", {})
+                    changed = _merge_missing(
+                        earnings_payload.setdefault("financial_report", {}),
+                        akshare_financial_report,
+                    ) or changed
+                if changed:
+                    result["source_chain"].append(f"growth:{fin_source}")
 
         # Earnings forecast
         forecast_df, forecast_source, forecast_errors = self._call_df_candidates([
@@ -370,17 +662,18 @@ class AkshareFundamentalAdapter:
                 result["source_chain"].append(f"earnings_quick:{quick_source}")
 
         # Dividend details (cash dividend, pre-tax)
-        dividend_df, dividend_source, dividend_errors = self._call_df_candidates([
-            ("stock_fhps_detail_em", {"symbol": stock_code}),
-            ("stock_history_dividend_detail", {"symbol": stock_code, "indicator": "分红", "date": ""}),
-            ("stock_dividend_cninfo", {"symbol": stock_code}),
-        ])
-        result["errors"].extend(dividend_errors)
-        if dividend_df is not None:
-            dividend_payload = _build_dividend_payload(dividend_df, stock_code, max_events=5)
-            if dividend_payload:
-                result["earnings"]["dividend"] = dividend_payload
-                result["source_chain"].append(f"dividend:{dividend_source}")
+        if not isinstance(result.get("earnings"), dict) or not result["earnings"].get("dividend"):
+            dividend_df, dividend_source, dividend_errors = self._call_df_candidates([
+                ("stock_fhps_detail_em", {"symbol": stock_code}),
+                ("stock_history_dividend_detail", {"symbol": stock_code, "indicator": "分红", "date": ""}),
+                ("stock_dividend_cninfo", {"symbol": stock_code}),
+            ])
+            result["errors"].extend(dividend_errors)
+            if dividend_df is not None:
+                dividend_payload = _build_dividend_payload(dividend_df, stock_code, max_events=5)
+                if dividend_payload:
+                    result["earnings"]["dividend"] = dividend_payload
+                    result["source_chain"].append(f"dividend:{dividend_source}")
 
         # Institution / top shareholders
         inst_df, inst_source, inst_errors = self._call_df_candidates([
@@ -409,7 +702,11 @@ class AkshareFundamentalAdapter:
                 result["institution"]["top10_holder_change"] = holder_change
                 result["source_chain"].append(f"top10:{top10_source}")
 
-        has_content = bool(result["growth"] or result["earnings"] or result["institution"])
+        has_content = (
+            _has_meaningful_payload(result.get("growth"))
+            or _has_meaningful_payload(result.get("earnings"))
+            or _has_meaningful_payload(result.get("institution"))
+        )
         result["status"] = "partial" if has_content else "not_supported"
         return result
 
