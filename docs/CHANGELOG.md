@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [文档] 恢复多语言 README 新闻源配置表中推荐项的加粗样式，统一相关项目章节层级，并精简顶部导航、联系文案和尾部展示。
 - [修复] LiteLLM 调用不再强制传递 `temperature` 参数，兼容拒绝该参数的 OpenAI-compatible 中转模型。
 - [修复] GitHub Actions 每日分析默认使用 `Asia/Shanghai` 时区生成报告和通知时间，避免 UTC 时间造成误解。
+- [新功能] Tushare 数据源新增 `TUSHARE_API_URL` 配置，可接入兼容 Tushare Pro HTTP 协议的中转服务，并同步支持 GitHub Actions 与股票列表脚本。
 
 ## [3.16.0] - 2026-05-10
 

@@ -9,7 +9,7 @@ Tushare 股票列表获取脚本
     python3 scripts/fetch_tushare_stock_list.py
 
 环境要求：
-    - 需要在 .env 中配置 TUSHARE_TOKEN
+    - 需要在 .env 中配置 TUSHARE_TOKEN；使用中转服务时可额外配置 TUSHARE_API_URL
     - 需要安装 tushare: pip install tushare
     - 账号积分要求：
         * A股/港股：2000积分
@@ -48,6 +48,7 @@ except ImportError:
 load_dotenv()
 
 TUSHARE_TOKEN = os.getenv('TUSHARE_TOKEN')
+TUSHARE_API_URL = (os.getenv('TUSHARE_API_URL') or '').strip()
 OUTPUT_DIR = Path(__file__).parent.parent / "data"
 PAGE_SIZE = 5000  # 美股每页读取数量（API 最大6000，设置5000留余量）
 SLEEP_MIN = 5     # 最小睡眠时间（秒）
@@ -68,6 +69,9 @@ def get_tushare_api() -> Optional[ts.pro_api]:
 
     try:
         api = ts.pro_api(TUSHARE_TOKEN)
+        if TUSHARE_API_URL:
+            api._DataApi__http_url = TUSHARE_API_URL
+            print(f"✓ 使用自定义 Tushare API 地址: {TUSHARE_API_URL}")
         # 测试连接
         api.trade_cal(exchange='SSE', start_date='20240101', end_date='20240101')
         print("✓ Tushare API 连接成功")
@@ -77,6 +81,7 @@ def get_tushare_api() -> Optional[ts.pro_api]:
         print("请检查：")
         print("  1. TUSHARE_TOKEN 是否正确")
         print("  2. 账号积分是否足够（A股/港股需要2000积分）")
+        print("  3. 使用中转服务时 TUSHARE_API_URL 是否正确")
         return None
 
 

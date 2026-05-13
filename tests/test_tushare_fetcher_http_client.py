@@ -65,7 +65,7 @@ class TestTushareFetcherInit(unittest.TestCase):
     """Ensure fetcher initialization no longer depends on the tushare SDK package."""
 
     def test_init_builds_http_client_when_token_present(self) -> None:
-        config = SimpleNamespace(tushare_token="demo-token")
+        config = SimpleNamespace(tushare_token="demo-token", tushare_api_url="http://api.tushare.pro")
 
         with patch("data_provider.tushare_fetcher.get_config", return_value=config):
             fetcher = TushareFetcher()
@@ -73,6 +73,25 @@ class TestTushareFetcherInit(unittest.TestCase):
         self.assertIsInstance(fetcher._api, _TushareHttpClient)
         self.assertTrue(fetcher.is_available())
         self.assertEqual(fetcher.priority, -1)
+
+    def test_init_uses_custom_tushare_api_url(self) -> None:
+        config = SimpleNamespace(
+            tushare_token="demo-token",
+            tushare_api_url="http://relay.example.com/",
+        )
+        response = MagicMock(
+            status_code=200,
+            text=json.dumps({"code": 0, "data": {"fields": ["ts_code"], "items": [["000001.SZ"]]}}),
+        )
+
+        with patch("data_provider.tushare_fetcher.get_config", return_value=config):
+            fetcher = TushareFetcher()
+
+        with patch("data_provider.tushare_fetcher.requests.post", return_value=response) as post_mock:
+            fetcher._api.daily(ts_code="000001.SZ")
+
+        post_mock.assert_called_once()
+        self.assertEqual(post_mock.call_args.args[0], "http://relay.example.com/")
 
 
 if __name__ == "__main__":

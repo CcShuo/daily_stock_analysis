@@ -72,10 +72,13 @@ def _is_us_code(stock_code: str) -> bool:
     return bool(re.match(r'^[A-Z]{1,5}(\.[A-Z])?$', code))
 
 
+DEFAULT_TUSHARE_API_URL = "http://api.tushare.pro"
+
+
 class _TushareHttpClient:
     """Lightweight Tushare Pro client that does not require the tushare SDK."""
 
-    def __init__(self, token: str, timeout: int = 30, api_url: str = "http://api.tushare.pro") -> None:
+    def __init__(self, token: str, timeout: int = 30, api_url: str = DEFAULT_TUSHARE_API_URL) -> None:
         self._token = token
         self._timeout = timeout
         self._api_url = api_url
@@ -178,8 +181,10 @@ class TushareFetcher(BaseFetcher):
         The project already normalizes all Pro calls through the same request
         contract, so we do not need the official tushare SDK during runtime.
         """
-        client = _TushareHttpClient(token=token)
-        logger.debug("Tushare API client configured for direct HTTP calls")
+        config = get_config()
+        api_url = (getattr(config, "tushare_api_url", None) or DEFAULT_TUSHARE_API_URL).strip()
+        client = _TushareHttpClient(token=token, api_url=api_url)
+        logger.debug("Tushare API client configured for direct HTTP calls: %s", api_url)
         return client
 
     def _determine_priority(self) -> int:
