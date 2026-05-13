@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 基本面结构化财报字段优先使用 Tushare `income`、`cashflow`、`fina_indicator` 与 `dividend` 接口，失败或缺字段时再回落 AkShare。
 - [改进] 个股分析日志输出结构化财报字段与 prompt 注入状态，便于排查 Tushare 财报链路。
 - [改进] 将基本面聚合默认超时放宽到阶段 25 秒、单能力源 15 秒，降低 Tushare 财报中转服务迟到导致报告缺失财报字段的概率。
+- [修复] Tushare 已返回核心财报字段时跳过 AkShare 补充查询，避免后续补充接口超时导致主流程丢弃已获取的 Tushare 财报。
 
 ## [3.16.0] - 2026-05-10
 

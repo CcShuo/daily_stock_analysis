@@ -298,6 +298,15 @@ def _has_meaningful_payload(payload: Any) -> bool:
     return False
 
 
+def _has_core_financial_report(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    return any(
+        payload.get(key) is not None and payload.get(key) != ""
+        for key in ("revenue", "net_profit_parent", "operating_cash_flow", "roe")
+    )
+
+
 def _to_tushare_ts_code(stock_code: str) -> Optional[str]:
     raw = _safe_str(stock_code).upper()
     if raw.endswith((".SH", ".SZ", ".BJ")):
@@ -587,6 +596,19 @@ class AkshareFundamentalAdapter:
         result.setdefault("institution", {})
         result.setdefault("source_chain", [])
         result.setdefault("errors", [])
+        earnings_payload = result.get("earnings")
+        financial_report = (
+            earnings_payload.get("financial_report")
+            if isinstance(earnings_payload, dict)
+            else None
+        )
+        if _has_core_financial_report(financial_report):
+            logger.info(
+                "[TushareFundamental] %s 已获取核心财报字段，跳过 AkShare 补充以避免超时: report_date=%s",
+                stock_code,
+                financial_report.get("report_date") if isinstance(financial_report, dict) else None,
+            )
+            return result
 
         # Financial indicators
         fin_df, fin_source, fin_errors = self._call_df_candidates([

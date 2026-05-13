@@ -229,7 +229,7 @@ class TestFundamentalAdapter(unittest.TestCase):
                     adapter,
                     "_call_df_candidates",
                     return_value=(None, None, []),
-                ):
+                ) as akshare_mock:
             result = adapter.get_fundamental_bundle("600519")
 
         financial_report = result["earnings"].get("financial_report", {})
@@ -242,6 +242,7 @@ class TestFundamentalAdapter(unittest.TestCase):
         self.assertEqual(result["growth"].get("net_profit_yoy"), 9.5)
         self.assertIn("financial_report:tushare_income_cashflow_fina_indicator", result["source_chain"])
         self.assertTrue(any(call.kwargs["json"]["api_name"] == "income" for call in post_mock.call_args_list))
+        akshare_mock.assert_not_called()
 
     def test_tushare_client_posts_to_configured_endpoint(self) -> None:
         client = _TushareFundamentalClient("demo-token", "http://relay.example.com/", timeout=12)
