@@ -2248,6 +2248,25 @@ class GeminiAnalyzer:
             logger.info(f"[LLM配置] 模型: {model_name}")
             logger.info(f"[LLM配置] Prompt 长度: {len(prompt)} 字符")
             logger.info(f"[LLM配置] 是否包含新闻: {'是' if news_context else '否'}")
+            structured_financials = self._extract_structured_financials(context)
+            financial_report = structured_financials["financial_report"]
+            dividend_metrics = structured_financials["dividend"]
+            logger.info(
+                "[结构化财报] 最近报告期=%s, 营业收入=%s, 归母净利润=%s, 经营现金流=%s, ROE=%s, "
+                "近12个月每股现金分红=%s, TTM股息率=%s, TTM分红事件数=%s",
+                financial_report.get("report_date", "N/A"),
+                financial_report.get("revenue", "N/A"),
+                financial_report.get("net_profit_parent", "N/A"),
+                financial_report.get("operating_cash_flow", "N/A"),
+                financial_report.get("roe", "N/A"),
+                dividend_metrics.get("ttm_cash_dividend_per_share", "N/A"),
+                dividend_metrics.get("ttm_dividend_yield_pct", "N/A"),
+                dividend_metrics.get("ttm_event_count", "N/A"),
+            )
+            logger.info(
+                "[LLM配置] 是否包含结构化财报: %s",
+                "是" if "财报与分红（价值投资口径）" in prompt else "否",
+            )
 
             # 记录完整 prompt 到日志（INFO级别记录摘要，DEBUG记录完整）
             prompt_preview = prompt[:500] + "..." if len(prompt) > 500 else prompt
@@ -2368,6 +2387,33 @@ class GeminiAnalyzer:
                 report_language=report_language,
             )
     
+    def _extract_structured_financials(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        fundamental_context = context.get("fundamental_context") if isinstance(context, dict) else None
+        earnings_block = (
+            fundamental_context.get("earnings", {})
+            if isinstance(fundamental_context, dict)
+            else {}
+        )
+        earnings_data = (
+            earnings_block.get("data", {})
+            if isinstance(earnings_block, dict)
+            else {}
+        )
+        financial_report = (
+            earnings_data.get("financial_report", {})
+            if isinstance(earnings_data, dict)
+            else {}
+        )
+        dividend_metrics = (
+            earnings_data.get("dividend", {})
+            if isinstance(earnings_data, dict)
+            else {}
+        )
+        return {
+            "financial_report": financial_report if isinstance(financial_report, dict) else {},
+            "dividend": dividend_metrics if isinstance(dividend_metrics, dict) else {},
+        }
+
     def _format_prompt(
         self, 
         context: Dict[str, Any], 
