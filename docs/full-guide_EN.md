@@ -295,8 +295,8 @@ For the P0 notification baseline and diagnostics, see [Notification Baseline](no
 | `ENABLE_EASTMONEY_PATCH` | Eastmoney API patch: Recommended to set to `true` when Eastmoney APIs fail frequently (e.g., RemoteDisconnected, connection closed). Injects NID tokens and random User-Agents to reduce rate limiting probability. | `false` | Optional |
 | `REALTIME_SOURCE_PRIORITY` | Real-time quote source priority (comma-separated), e.g., `tencent,akshare_sina,efinance,akshare_em` | See .env.example | Optional |
 | `ENABLE_FUNDAMENTAL_PIPELINE` | Master switch for fundamental aggregation; when disabled, returns `not_supported` block only, without altering the original analysis pipeline. | `true` | Optional |
-| `FUNDAMENTAL_STAGE_TIMEOUT_SECONDS` | Total latency budget for the fundamental stage (seconds) | `1.5` | Optional |
-| `FUNDAMENTAL_FETCH_TIMEOUT_SECONDS` | Timeout for a single capability source call (seconds) | `0.8` | Optional |
+| `FUNDAMENTAL_STAGE_TIMEOUT_SECONDS` | Total latency budget for the fundamental stage (seconds) | `25` | Optional |
+| `FUNDAMENTAL_FETCH_TIMEOUT_SECONDS` | Timeout for a single capability source call (seconds) | `15` | Optional |
 | `FUNDAMENTAL_RETRY_MAX` | Retry count for fundamental capabilities (including the first attempt) | `1` | Optional |
 | `FUNDAMENTAL_CACHE_TTL_SECONDS` | Fundamental aggregation cache TTL (seconds), short cache to reduce repeated API pulling. | `120` | Optional |
 | `FUNDAMENTAL_CACHE_MAX_ENTRIES` | Maximum entries for fundamental cache (evicted by time within TTL) | `256` | Optional |
@@ -307,7 +307,7 @@ For the P0 notification baseline and diagnostics, see [Notification Baseline](no
 > - **US/HK stocks**: Returns `not_supported` fallback block.
 > - Any exception uses fail-open logic, only logs errors without affecting the main technical/news/chip pipeline.
 > - When `TUSHARE_TOKEN` is configured, structured financial fields prefer Tushare `income`, `cashflow`, `fina_indicator`, and `dividend`, then fall back to AkShare for failures or missing fields.
-> - GitHub Actions widens the fundamental budget to `FUNDAMENTAL_STAGE_TIMEOUT_SECONDS=8` and `FUNDAMENTAL_FETCH_TIMEOUT_SECONDS=6` by default so Tushare financial endpoints have enough time to return; override them with Repository Variables when needed.
+> - GitHub Actions uses `FUNDAMENTAL_STAGE_TIMEOUT_SECONDS=25` and `FUNDAMENTAL_FETCH_TIMEOUT_SECONDS=15` by default so Tushare financial endpoints or relay services have enough time to return; override them with Repository Variables when needed.
 > - **Field contracts**:
 >   - `fundamental_context.belong_boards` = related board list for the stock (currently populated for A-shares only; `[]` when unavailable);
 >   - `fundamental_context.boards.data` = `sector_rankings` (sector rise/fall leaderboard, structure `{top, bottom}`);
@@ -318,7 +318,7 @@ For the P0 notification baseline and diagnostics, see [Notification Baseline](no
 >   - `AnalysisReport.details.sector_rankings` = sector leaderboard in structured report details for board-linkage display.
 > - **Sector leaderboard** uses a fixed fallback order: consistent with global priority.
 > - **Timeout control** is a `best-effort` soft timeout: the stage will quickly degrade and continue execution based on the budget, but does not guarantee a hard interrupt of underlying third-party network calls.
-> - `FUNDAMENTAL_STAGE_TIMEOUT_SECONDS=1.5` indicates the target budget for the newly added fundamental stage, not a strict hard SLA.
+> - `FUNDAMENTAL_STAGE_TIMEOUT_SECONDS=25` indicates the target budget for the newly added fundamental stage, not a strict hard SLA.
 > - For a hard SLA, please upgrade to isolated child process execution in future versions to forcefully terminate timeout tasks.
 
 ### Other Configuration
